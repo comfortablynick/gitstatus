@@ -2,11 +2,14 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	s "strings"
 )
+
+const gitExe = "git"
 
 // Test directories
 var dotDir = os.ExpandEnv("$HOME/dotfiles")
@@ -14,13 +17,10 @@ var vimDir = os.ExpandEnv("$HOME/src/vim")
 
 var dir = cwd()
 
-func gitStatus() string {
-	exe := "git"
-	args := []string{}
-	args = append(args, "-C", dir)
-	args = append(args, "status", "--porcelain", "--branch")
-	log.Printf("Command: %s %s", exe, args)
-	cmd := exec.Command(exe, args...)
+func run(command string) string {
+	cmdArgs := s.Split(command, " ")
+	log.Printf("Command: %s", cmdArgs)
+	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 	out, err := cmd.Output()
 	if err != nil {
 		log.Fatalf("cmd.Run() failed with %s\n", err)
@@ -29,26 +29,11 @@ func gitStatus() string {
 }
 
 func cwd() string {
-	dir, err := os.Getwd()
+	path, err := os.Getwd()
 	if err != nil {
 		log.Printf("os.Getwd() error: %s", err)
 	}
-	return dir
-}
-
-func gitTag() string {
-	// TODO: return hash if tag fails
-	exe := "git"
-	args := []string{}
-	args = append(args, "-C", dir)
-	args = append(args, "describe", "--tags", "--exact-match")
-	log.Printf("Command: %s %s", exe, args)
-	cmd := exec.Command(exe, args...)
-	out, err := cmd.Output()
-	if err != nil {
-		log.Fatalf("cmd.Run() failed with %s\n", err)
-	}
-	return string(out)
+	return path
 }
 
 /*
@@ -67,22 +52,9 @@ def get_diff():
     return sum(plus), sum(minus)
 */
 
-func gitDiff() string {
-	exe := "git"
-	args := []string{}
-	args = append(args, "-C", dir)
-	args = append(args, "diff", "--numstat")
-	log.Printf("Command: %s %s", exe, args)
-	cmd := exec.Command(exe, args...)
-	out, err := cmd.Output()
-	if err != nil {
-		log.Fatalf("cmd.Run() failed with %s\n", err)
-	}
-	return string(out)
-}
-
 func main() {
-	status := gitStatus()
+	// status := gitStatus()
+	status := run(fmt.Sprintf("git -C %s status --porcelain --branch", dir))
 	lines := s.Split(status, "\n")
 	var branch, remoteBranch string
 	var untracked, modified, deleted, renamed, unmerged, added []string
@@ -96,7 +68,7 @@ func main() {
 		case "##":
 			switch {
 			case s.Contains(rest, "no branch"):
-				branch = gitTag()
+				branch = run(fmt.Sprintf("git -C %s describe --tags --exact-match", dir))
 			case s.Contains(rest, "Initial commit on") || s.Contains(rest, "No commits yet on"):
 				branch = restParts[len(restParts)-1]
 			case len(s.Split(s.TrimSpace(rest), "...")) == 1:
@@ -118,7 +90,7 @@ func main() {
 				}
 			}
 		default:
-			if string(st[0:2]) == "??" {
+			if st[0:2] == "??" {
 				untracked = append(untracked, st[0:2])
 			}
 			if string(st[1]) == "M" {
@@ -130,7 +102,7 @@ func main() {
 			if string(st[1]) == "D" {
 				deleted = append(deleted, st[0:2])
 			}
-			if s.Contains(string(st[0:2]), "R") {
+			if s.Contains(st[0:2], "R") {
 				untracked = append(renamed, st[0:2])
 			}
 			if string(st[0]) != " " {
@@ -145,5 +117,5 @@ func main() {
 	log.Printf("Deleted:   %d", len(deleted))
 	log.Printf("Renamed:   %d", len(renamed))
 	log.Printf("Untracked: %d", len(untracked))
-	log.Printf("gitDiff:\n%s", gitDiff())
+	log.Printf("gitDiff:\n%s", run(fmt.Sprintf("git -C %s diff --numstat", dir)))
 }
