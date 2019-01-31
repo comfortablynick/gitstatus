@@ -9,18 +9,16 @@ import (
 	s "strings"
 )
 
-const gitExe = "git"
-
 // Test directories
-var dotDir = os.ExpandEnv("$HOME/dotfiles")
-var vimDir = os.ExpandEnv("$HOME/src/vim")
+// var dotDir = os.ExpandEnv("$HOME/dotfiles")
+// var vimDir = os.ExpandEnv("$HOME/src/vim")
 
 var dir = cwd()
 
 func run(command string) string {
 	cmdArgs := s.Split(command, " ")
 	log.Printf("Command: %s", cmdArgs)
-	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...) // #nosec
 	out, err := cmd.Output()
 	if err != nil {
 		log.Fatalf("cmd.Run() failed with %s\n", err)
@@ -36,28 +34,22 @@ func cwd() string {
 	return path
 }
 
-/*
-# Working Python code
-def get_diff():
-    """Return +/- (added/deleted) of current repo."""
-    cmd = Popen(["git", "diff", "--numstat"], stdout=PIPE, stderr=PIPE)
-    stdout, stderr = cmd.communicate()
-    raw = stdout.decode("utf-8").splitlines()
-    diff = [re.split(r"\s+", r) for r in raw]
-    plus = []
-    minus = []
-    for d in diff:
-        plus.append(int(d[0]))
-        minus.append(int(d[1]))
-    return sum(plus), sum(minus)
-*/
+type repoInfo struct {
+	Branch    string
+	Remote    string
+	Added     int
+	Modified  int
+	Deleted   int
+	Renamed   int
+	Unmerged  int
+	Untracked int
+}
 
-func main() {
-	// status := gitStatus()
+func parseStatus() repoInfo {
 	status := run(fmt.Sprintf("git -C %s status --porcelain --branch", dir))
 	lines := s.Split(status, "\n")
 	var branch, remoteBranch string
-	var untracked, modified, deleted, renamed, unmerged, added []string
+	var untracked, modified, deleted, renamed, unmerged, added int
 
 	for _, st := range lines[:len(lines)-1] {
 		rest := st[2:]
@@ -91,31 +83,61 @@ func main() {
 			}
 		default:
 			if st[0:2] == "??" {
-				untracked = append(untracked, st[0:2])
+				untracked++
 			}
 			if string(st[1]) == "M" {
-				modified = append(modified, st[0:2])
+				modified++
 			}
 			if string(st[0]) == "U" {
-				unmerged = append(unmerged, st[0:2])
+				unmerged++
 			}
 			if string(st[1]) == "D" {
-				deleted = append(deleted, st[0:2])
+				deleted++
 			}
 			if s.Contains(st[0:2], "R") {
-				untracked = append(renamed, st[0:2])
+				untracked++
 			}
 			if string(st[0]) != " " {
-				added = append(added, st[0:2])
+				added++
 			}
 		}
 	}
-	log.Printf("Branch:    %s", branch)
-	log.Printf("Remote:    %s", remoteBranch)
-	log.Printf("Added:     %d", len(added))
-	log.Printf("Modified:  %d", len(modified))
-	log.Printf("Deleted:   %d", len(deleted))
-	log.Printf("Renamed:   %d", len(renamed))
-	log.Printf("Untracked: %d", len(untracked))
+	return repoInfo{
+		Branch:    branch,
+		Remote:    remoteBranch,
+		Added:     added,
+		Modified:  modified,
+		Deleted:   deleted,
+		Renamed:   renamed,
+		Unmerged:  unmerged,
+		Untracked: untracked,
+	}
+}
+
+/*
+# Working Python code
+def get_diff():
+    """Return +/- (added/deleted) of current repo."""
+    cmd = Popen(["git", "diff", "--numstat"], stdout=PIPE, stderr=PIPE)
+    stdout, stderr = cmd.communicate()
+    raw = stdout.decode("utf-8").splitlines()
+    diff = [re.split(r"\s+", r) for r in raw]
+    plus = []
+    minus = []
+    for d in diff:
+        plus.append(int(d[0]))
+        minus.append(int(d[1]))
+    return sum(plus), sum(minus)
+*/
+func main() {
+	r := parseStatus()
+	log.Printf("Branch:    %s", r.Branch)
+	log.Printf("Remote:    %s", r.Remote)
+	log.Printf("Added:     %d", r.Added)
+	log.Printf("Modified:  %d", r.Modified)
+	log.Printf("Deleted:   %d", r.Deleted)
+	log.Printf("Renamed:   %d", r.Renamed)
+	log.Printf("Unmerged:  %d", r.Unmerged)
+	log.Printf("Untracked: %d", r.Untracked)
 	log.Printf("gitDiff:\n%s", run(fmt.Sprintf("git -C %s diff --numstat", dir)))
 }
