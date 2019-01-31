@@ -35,14 +35,16 @@ func cwd() string {
 }
 
 type repoInfo struct {
-	Branch    string
-	Remote    string
-	Added     int
-	Modified  int
-	Deleted   int
-	Renamed   int
-	Unmerged  int
-	Untracked int
+	Branch     string
+	Remote     string
+	Added      int
+	Modified   int
+	Deleted    int
+	Renamed    int
+	Unmerged   int
+	Untracked  int
+	Insertions int
+	Deletions  int
 }
 
 func parseStatus() repoInfo {
@@ -102,6 +104,8 @@ func parseStatus() repoInfo {
 			}
 		}
 	}
+	gitDiff := run(fmt.Sprintf("git -C %s diff --numstat", dir))
+	log.Printf("gitDiff:\n%s", gitDiff)
 	return repoInfo{
 		Branch:    branch,
 		Remote:    remoteBranch,
@@ -131,13 +135,14 @@ def get_diff():
 */
 func main() {
 	r := parseStatus()
-	log.Printf("Branch:    %s", r.Branch)
-	log.Printf("Remote:    %s", r.Remote)
-	log.Printf("Added:     %d", r.Added)
-	log.Printf("Modified:  %d", r.Modified)
-	log.Printf("Deleted:   %d", r.Deleted)
-	log.Printf("Renamed:   %d", r.Renamed)
-	log.Printf("Unmerged:  %d", r.Unmerged)
-	log.Printf("Untracked: %d", r.Untracked)
-	log.Printf("gitDiff:\n%s", run(fmt.Sprintf("git -C %s diff --numstat", dir)))
+	log.Printf("Branch:     %s", r.Branch)
+	log.Printf("Remote:     %s", r.Remote)
+	log.Printf("Added:      %d", r.Added)
+	log.Printf("Modified:   %d", r.Modified)
+	log.Printf("Deleted:    %d", r.Deleted)
+	log.Printf("Renamed:    %d", r.Renamed)
+	log.Printf("Unmerged:   %d", r.Unmerged)
+	log.Printf("Untracked:  %d", r.Untracked)
+	log.Printf("Insertions: %d", r.Insertions)
+	log.Printf("Deletions:  %d", r.Insertions)
 }
