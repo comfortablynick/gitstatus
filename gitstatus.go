@@ -1,27 +1,35 @@
-// vim:set sw=4 ts=4:
 package main
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	re "regexp"
 	"strconv"
 	s "strings"
+
+	"github.com/subchen/go-log"
 )
 
 var dir = cwd()
 
 const gitHashLen = 12
 
+func cwd() string {
+	path, err := os.Getwd()
+	if err != nil {
+		log.Debugf("os.Getwd() error: %s", err)
+	}
+	return path
+}
+
 func run(command string) string {
 	cmdArgs := s.Split(command, " ")
-	log.Printf("Command: %s", cmdArgs)
+	log.Debugf("Command: %s", cmdArgs)
 	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...) // #nosec
 	out, err := cmd.Output()
 	if err != nil {
-		log.Fatalf("cmd.Run() failed with %s\n", err)
+		log.Warnf("cmd.Run() failed with %s\n", err)
 	}
 	return string(out)
 }
@@ -53,14 +61,6 @@ func gitDiff() (int, int) {
 	return ins, del
 }
 
-func cwd() string {
-	path, err := os.Getwd()
-	if err != nil {
-		log.Printf("os.Getwd() error: %s", err)
-	}
-	return path
-}
-
 type repoInfo struct {
 	Branch     string
 	Remote     string
@@ -74,6 +74,37 @@ type repoInfo struct {
 	Deletions  int
 }
 
+func parseBranch(raw string) (string, string) {
+	var branch, remoteBranch string
+	rest := raw[2:]
+	restParts := s.Split(rest, " ")
+	log.Debugln(raw[0:2], rest)
+	switch {
+	case s.Contains(rest, "no branch"):
+		branch = gitTagOrHash(gitHashLen)
+	case s.Contains(rest, "Initial commit on") || s.Contains(rest, "No commits yet on"):
+		branch = restParts[len(restParts)-1]
+	case len(s.Split(s.TrimSpace(rest), "...")) == 1:
+		branch = s.TrimSpace(rest)
+	default:
+		splitted := s.Split(s.TrimSpace(rest), "...")
+		branch = splitted[0]
+		rem := splitted[1]
+		switch {
+		case len(s.Split(rem, " ")) == 1:
+			remoteBranch = s.Split(rem, " ")[0]
+		default:
+			divergence := s.Join(s.Split(rem, " ")[1:], " ")
+			remoteBranch = divergence
+			remoteBranch = s.Trim(remoteBranch, "[]")
+			for _, div := range s.Split(divergence, ", ") {
+				log.Debugln(div)
+			}
+		}
+	}
+	return branch, remoteBranch
+}
+
 func parseStatus() repoInfo {
 	status := run(fmt.Sprintf("git -C %s status --porcelain --branch", dir))
 	lines := s.Split(status, "\n")
@@ -81,35 +112,9 @@ func parseStatus() repoInfo {
 	var untracked, modified, deleted, renamed, unmerged, added, insertions, deletions int
 
 	for _, st := range lines[:len(lines)-1] {
-		rest := st[2:]
-		restParts := s.Split(rest, " ")
-		log.Println(st[0:2], rest)
-
 		switch st[0:2] {
 		case "##":
-			switch {
-			case s.Contains(rest, "no branch"):
-				branch = gitTagOrHash(gitHashLen)
-			case s.Contains(rest, "Initial commit on") || s.Contains(rest, "No commits yet on"):
-				branch = restParts[len(restParts)-1]
-			case len(s.Split(s.TrimSpace(rest), "...")) == 1:
-				branch = s.TrimSpace(rest)
-			default:
-				splitted := s.Split(s.TrimSpace(rest), "...")
-				branch = splitted[0]
-				rem := splitted[1]
-				switch {
-				case len(s.Split(rem, " ")) == 1:
-					remoteBranch = s.Split(rem, " ")[0]
-				default:
-					divergence := s.Join(s.Split(rem, " ")[1:], " ")
-					remoteBranch = divergence
-					remoteBranch = s.Trim(remoteBranch, "[]")
-					for _, div := range s.Split(divergence, ", ") {
-						log.Println(div)
-					}
-				}
-			}
+			branch, remoteBranch = parseBranch(st)
 		default:
 			if st[0:2] == "??" {
 				untracked++
@@ -132,6 +137,9 @@ func parseStatus() repoInfo {
 		}
 	}
 	insertions, deletions = gitDiff()
+	if remoteBranch == "" {
+		remoteBranch = "."
+	}
 	return repoInfo{
 		Branch:     branch,
 		Remote:     remoteBranch,
@@ -147,15 +155,19 @@ func parseStatus() repoInfo {
 }
 
 func main() {
+	log.Default.Level = log.DEBUG
 	r := parseStatus()
-	log.Printf("Branch:     %s", r.Branch)
-	log.Printf("Remote:     %s", r.Remote)
-	log.Printf("Added:      %d", r.Added)
-	log.Printf("Modified:   %d", r.Modified)
-	log.Printf("Deleted:    %d", r.Deleted)
-	log.Printf("Renamed:    %d", r.Renamed)
-	log.Printf("Unmerged:   %d", r.Unmerged)
-	log.Printf("Untracked:  %d", r.Untracked)
-	log.Printf("Insertions: %d", r.Insertions)
-	log.Printf("Deletions:  %d", r.Deletions)
+	log.Debugln("=== PARSED STATUS ===")
+	log.Debugf("    Branch: %s", r.Branch)
+	log.Debugf("    Remote: %s", r.Remote)
+	log.Debugf("     Added: %d", r.Added)
+	log.Debugf("  Modified: %d", r.Modified)
+	log.Debugf("   Deleted: %d", r.Deleted)
+	log.Debugf("   Renamed: %d", r.Renamed)
+	log.Debugf("  Unmerged: %d", r.Unmerged)
+	log.Debugf(" Untracked: %d", r.Untracked)
+	log.Debugf("Insertions: %d", r.Insertions)
+	log.Debugf(" Deletions: %d", r.Deletions)
 }
+
+// vim:set sw=4 ts=4:
