@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	re "regexp"
+	"strconv"
 	s "strings"
 )
 
@@ -26,6 +28,10 @@ func run(command string) string {
 	return string(out)
 }
 
+func gitHash(hashLen int) string {
+	cmd := fmt.Sprintf("git -C %s rev-parse --short=%d HEAD", dir, hashLen)
+	return run(cmd)
+}
 func cwd() string {
 	path, err := os.Getwd()
 	if err != nil {
@@ -51,7 +57,7 @@ func parseStatus() repoInfo {
 	status := run(fmt.Sprintf("git -C %s status --porcelain --branch", dir))
 	lines := s.Split(status, "\n")
 	var branch, remoteBranch string
-	var untracked, modified, deleted, renamed, unmerged, added int
+	var untracked, modified, deleted, renamed, unmerged, added, insertions, deletions int
 
 	for _, st := range lines[:len(lines)-1] {
 		rest := st[2:]
@@ -105,34 +111,33 @@ func parseStatus() repoInfo {
 		}
 	}
 	gitDiff := run(fmt.Sprintf("git -C %s diff --numstat", dir))
-	log.Printf("gitDiff:\n%s", gitDiff)
+	difflines := s.Split(gitDiff, "\n")
+	space := re.MustCompile(`\s+`)
+	for _, ln := range difflines[:len(difflines)-1] {
+		diffline := space.Split(ln, -1)
+		// log.Println(diffline[1])
+		if i, err := strconv.Atoi(diffline[0]); err == nil {
+			insertions += i
+		}
+		if i, err := strconv.Atoi(diffline[1]); err == nil {
+			deletions += i
+		}
+	}
+	// log.Printf("gitDiff:\n%s", gitDiff)
 	return repoInfo{
-		Branch:    branch,
-		Remote:    remoteBranch,
-		Added:     added,
-		Modified:  modified,
-		Deleted:   deleted,
-		Renamed:   renamed,
-		Unmerged:  unmerged,
-		Untracked: untracked,
+		Branch:     branch,
+		Remote:     remoteBranch,
+		Added:      added,
+		Modified:   modified,
+		Deleted:    deleted,
+		Renamed:    renamed,
+		Unmerged:   unmerged,
+		Untracked:  untracked,
+		Insertions: insertions,
+		Deletions:  deletions,
 	}
 }
 
-/*
-# Working Python code
-def get_diff():
-    """Return +/- (added/deleted) of current repo."""
-    cmd = Popen(["git", "diff", "--numstat"], stdout=PIPE, stderr=PIPE)
-    stdout, stderr = cmd.communicate()
-    raw = stdout.decode("utf-8").splitlines()
-    diff = [re.split(r"\s+", r) for r in raw]
-    plus = []
-    minus = []
-    for d in diff:
-        plus.append(int(d[0]))
-        minus.append(int(d[1]))
-    return sum(plus), sum(minus)
-*/
 func main() {
 	r := parseStatus()
 	log.Printf("Branch:     %s", r.Branch)
@@ -144,5 +149,6 @@ func main() {
 	log.Printf("Unmerged:   %d", r.Unmerged)
 	log.Printf("Untracked:  %d", r.Untracked)
 	log.Printf("Insertions: %d", r.Insertions)
-	log.Printf("Deletions:  %d", r.Insertions)
+	log.Printf("Deletions:  %d", r.Deletions)
+	log.Printf("Hash:       %s", gitHash(12))
 }
