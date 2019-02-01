@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	re "regexp"
@@ -15,52 +16,6 @@ var dir = cwd()
 
 const gitHashLen = 12
 
-func cwd() string {
-	path, err := os.Getwd()
-	if err != nil {
-		log.Debugf("os.Getwd() error: %s", err)
-	}
-	return path
-}
-
-func run(command string) string {
-	cmdArgs := s.Split(command, " ")
-	log.Debugf("Command: %s", cmdArgs)
-	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...) // #nosec
-	out, err := cmd.Output()
-	if err != nil {
-		log.Warnf("cmd.Run() failed with %s\n", err)
-	}
-	return string(out)
-}
-
-// Return git tag (if checked out), or else hash
-func gitTagOrHash(hashLen int) string {
-	if tag := run(fmt.Sprintf("git -C %s describe --tags --exact-match", dir)); tag != "" {
-		return tag
-	}
-	return run(fmt.Sprintf("git -C %s rev-parse --short=%d HEAD", dir, hashLen))
-}
-
-var space = re.MustCompile(`\s+`)
-
-func gitDiff() (int, int) {
-	diff := run(fmt.Sprintf("git -C %s diff --numstat", dir))
-	difflines := s.Split(diff, "\n")
-	var ins, del int
-	for _, ln := range difflines[:len(difflines)-1] {
-		diffline := space.Split(ln, -1)
-		// log.Println(diffline[1])
-		if i, err := strconv.Atoi(diffline[0]); err == nil {
-			ins += i
-		}
-		if i, err := strconv.Atoi(diffline[1]); err == nil {
-			del += i
-		}
-	}
-	return ins, del
-}
-
 type repoInfo struct {
 	Branch     string
 	Remote     string
@@ -73,6 +28,85 @@ type repoInfo struct {
 	Insertions int
 	Deletions  int
 }
+
+func cwd() string {
+	path, err := os.Getwd()
+	if err != nil {
+		log.Debugf("os.Getwd() error: %s", err)
+	}
+	return path
+}
+
+func run(command string) (string, error) {
+	cmdArgs := s.Split(command, " ")
+	log.Debugf("Command: %s", cmdArgs)
+	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...) // #nosec
+	out, err := cmd.Output()
+	return string(out), err
+}
+
+// Return git tag (if checked out), or else hash
+func gitTagOrHash(hashLen int) string {
+	var str string
+	var err error
+	if str, err = run(fmt.Sprintf("git -C %s describe --tags --exact-match", dir)); err == nil {
+		return str
+	}
+	if str, err = run(fmt.Sprintf("git -C %s rev-parse --short=%d HEAD", dir, hashLen)); err == nil {
+		return str
+	}
+	log.Errorf("gitTagOrHash() failed: %s\n", err)
+	return ""
+}
+
+var space = re.MustCompile(`\s+`)
+
+func gitDiff() (int, int) {
+	diff, err := run(fmt.Sprintf("git -C %s diff --numstat", dir))
+	if err != nil {
+		log.Errorf("gitDiff() failed: %s\n", err)
+	}
+	difflines := s.Split(diff, "\n")
+	var ins, del int
+	for _, ln := range difflines[:len(difflines)-1] {
+		diffline := space.Split(ln, -1)
+		if i, err := strconv.Atoi(diffline[0]); err == nil {
+			ins += i
+		}
+		if i, err := strconv.Atoi(diffline[1]); err == nil {
+			del += i
+		}
+	}
+	return ins, del
+}
+
+func gitStash() int {
+	var gitDir string
+	var stash []byte
+	var err error
+	if gitDir, err = run(fmt.Sprintf("git -C %s rev-parse --git-dir", dir)); err != nil {
+		return 0
+	}
+	if stash, err = ioutil.ReadFile(fmt.Sprintf("%s/logs/refs/stash", gitDir)); err != nil {
+		return 0
+	}
+	_ = stash
+	return 0
+}
+
+/*
+def get_stash():
+    """Execute git command to get stash info."""
+    cmd = Popen(["git", "rev-parse", "--git-dir"], stdout=PIPE, stderr=PIPE)
+    so, se = cmd.communicate()
+    stash_file = "{}{}".format(so.decode("utf-8").rstrip(), "/logs/refs/stash")
+
+    try:
+        with open(stash_file) as f:
+            return sum(1 for _ in f)
+    except IOError:
+        return 0
+*/
 
 func parseBranch(raw string) (string, string) {
 	var branch, remoteBranch string
@@ -98,7 +132,12 @@ func parseBranch(raw string) (string, string) {
 			remoteBranch = divergence
 			remoteBranch = s.Trim(remoteBranch, "[]")
 			for _, div := range s.Split(divergence, ", ") {
-				log.Debugln(div)
+				if s.Contains(div, "ahead") {
+					log.Debugln("Ahead of remote")
+				}
+				if s.Contains(div, "behind") {
+					log.Debugln("Behind remote")
+				}
 			}
 		}
 	}
@@ -106,7 +145,10 @@ func parseBranch(raw string) (string, string) {
 }
 
 func parseStatus() repoInfo {
-	status := run(fmt.Sprintf("git -C %s status --porcelain --branch", dir))
+	status, err := run(fmt.Sprintf("git -C %s status --porcelain --branch", dir))
+	if err != nil {
+		log.Errorf("git status failed:\n%s", err)
+	}
 	lines := s.Split(status, "\n")
 	var branch, remoteBranch string
 	var untracked, modified, deleted, renamed, unmerged, added, insertions, deletions int
@@ -157,17 +199,17 @@ func parseStatus() repoInfo {
 func main() {
 	log.Default.Level = log.DEBUG
 	r := parseStatus()
-	log.Debugln("=== PARSED STATUS ===")
-	log.Debugf("    Branch: %s", r.Branch)
-	log.Debugf("    Remote: %s", r.Remote)
-	log.Debugf("     Added: %d", r.Added)
-	log.Debugf("  Modified: %d", r.Modified)
-	log.Debugf("   Deleted: %d", r.Deleted)
-	log.Debugf("   Renamed: %d", r.Renamed)
-	log.Debugf("  Unmerged: %d", r.Unmerged)
-	log.Debugf(" Untracked: %d", r.Untracked)
-	log.Debugf("Insertions: %d", r.Insertions)
-	log.Debugf(" Deletions: %d", r.Deletions)
+	log.Infoln("=== PARSED STATUS ===")
+	log.Infof("    Branch: %s", r.Branch)
+	log.Infof("    Remote: %s", r.Remote)
+	log.Infof("     Added: %d", r.Added)
+	log.Infof("  Modified: %d", r.Modified)
+	log.Infof("   Deleted: %d", r.Deleted)
+	log.Infof("   Renamed: %d", r.Renamed)
+	log.Infof("  Unmerged: %d", r.Unmerged)
+	log.Infof(" Untracked: %d", r.Untracked)
+	log.Infof("Insertions: %d", r.Insertions)
+	log.Infof(" Deletions: %d", r.Deletions)
 }
 
 // vim:set sw=4 ts=4:
