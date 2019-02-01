@@ -9,8 +9,26 @@ import (
 	"strconv"
 	s "strings"
 
+	"github.com/celicoo/docli"
 	"github.com/subchen/go-log"
 )
+
+var doc = `
+Usage: gitstatus [-d] <command> [-h] [-f FORMAT]...
+
+Fast git status for your prompt!
+
+commands:
+  h, help               show this help message and exit
+  v, version            show version info and exit
+
+optional arguments:
+  -f, --format          format output according to string
+  -d, --debug           print debug messages
+  -v, --version         show version info and exit
+  -h, --help            show help for command
+`
+var version = "gitstatus version 0.0.1"
 
 var dir = cwd()
 
@@ -196,7 +214,37 @@ func parseStatus() repoInfo {
 	}
 }
 
+type cli struct {
+	// Commands
+	Help    bool
+	Version bool
+
+	// Options
+	Debug  bool
+	Format string
+}
+
 func main() {
+	// Handle args
+	args, err := docli.Parse(doc)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var c cli
+	args.Bind(&c)
+
+	if c.Help {
+		fmt.Println(doc)
+		os.Exit(0)
+	}
+	if c.Version {
+		fmt.Println(version)
+		os.Exit(0)
+	}
+	if c.Format != "" {
+		log.Debugf("Format string: %s", c.Format)
+	}
+
 	log.Default.Level = log.DEBUG
 	r := parseStatus()
 	log.Infoln("=== PARSED STATUS ===")
