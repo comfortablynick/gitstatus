@@ -10,6 +10,7 @@ import (
 	s "strings"
 
 	"github.com/celicoo/docli"
+	// "github.com/jessevdk/go-flags"
 	"github.com/subchen/go-log"
 )
 
@@ -25,12 +26,15 @@ commands:
 optional arguments:
   -f, --format          format output according to string
   -d, --debug           print debug messages
+  -t, --timeout         timeout length in ms
   -v, --version         show version info and exit
   -h, --help            show help for command
 `
 var version = "gitstatus version 0.0.1"
 
 var dir = cwd()
+
+// var dir = os.ExpandEnv("$HOME/git/python")
 
 const gitHashLen = 12
 
@@ -43,6 +47,7 @@ type repoInfo struct {
 	Renamed    int
 	Unmerged   int
 	Untracked  int
+	Stashed    int
 	Insertions int
 	Deletions  int
 }
@@ -102,14 +107,15 @@ func gitStash() int {
 	var gitDir string
 	var stash []byte
 	var err error
-	if gitDir, err = run(fmt.Sprintf("git -C %s rev-parse --git-dir", dir)); err != nil {
+	if gitDir, err = run(fmt.Sprintf("git -C %s rev-parse --show-toplevel", dir)); err != nil {
 		return 0
 	}
-	if stash, err = ioutil.ReadFile(fmt.Sprintf("%s/logs/refs/stash", gitDir)); err != nil {
+	stashFile := s.Trim(gitDir, "\n") + "/.git/logs/refs/stash"
+	if stash, err = ioutil.ReadFile(stashFile); err != nil {
 		return 0
 	}
-	_ = stash
-	return 0
+	// Subtract 1 for the last line ending
+	return len(s.Split(string(stash), "\n")) - 1
 }
 
 /*
@@ -208,6 +214,7 @@ func parseStatus() repoInfo {
 		Deleted:    deleted,
 		Renamed:    renamed,
 		Unmerged:   unmerged,
+		Stashed:    gitStash(),
 		Untracked:  untracked,
 		Insertions: insertions,
 		Deletions:  deletions,
@@ -220,12 +227,25 @@ type cli struct {
 	Version bool
 
 	// Options
-	Debug  bool
-	Format string
+	Debug   bool
+	Format  string
+	Timeout int16
+}
+
+var opts struct {
+	Debug   []bool `short:"d" long:"debug" description:"increase debug verbosity"`
+	Version bool   `short:"v" long:"version" description:"show version info and exit"`
 }
 
 func main() {
 	// Handle args
+	log.Default.Level = log.DEBUG
+	// args, err := flags.Parse(&opts)
+	// if err != nil {
+	// 	log.Errorln(err)
+	// }
+	// log.Debugf("Parsed args: %v", opts)
+	// log.Debugf("Remaining args: %v", args)
 	args, err := docli.Parse(doc)
 	if err != nil {
 		log.Fatal(err)
@@ -233,6 +253,12 @@ func main() {
 	var c cli
 	args.Bind(&c)
 
+	if c.Debug {
+		log.Default.Level = log.DEBUG
+	}
+	if len(os.Args) > 1 {
+		log.Debugf("%+v\n", c)
+	}
 	if c.Help {
 		fmt.Println(doc)
 		os.Exit(0)
@@ -244,8 +270,10 @@ func main() {
 	if c.Format != "" {
 		log.Debugf("Format string: %s", c.Format)
 	}
+	if c.Timeout > 0 {
+		log.Debugf("Timeout length: %d", c.Timeout)
+	}
 
-	log.Default.Level = log.DEBUG
 	r := parseStatus()
 	log.Infoln("=== PARSED STATUS ===")
 	log.Infof("    Branch: %s", r.Branch)
@@ -255,6 +283,7 @@ func main() {
 	log.Infof("   Deleted: %d", r.Deleted)
 	log.Infof("   Renamed: %d", r.Renamed)
 	log.Infof("  Unmerged: %d", r.Unmerged)
+	log.Infof("   Stashed: %d", r.Stashed)
 	log.Infof(" Untracked: %d", r.Untracked)
 	log.Infof("Insertions: %d", r.Insertions)
 	log.Infof(" Deletions: %d", r.Deletions)
