@@ -226,8 +226,18 @@ var opts struct {
 func main() {
 	log.Default.Level = log.WARN
 
+	args := (func() []string {
+		if len(os.Args) > 1 {
+			return os.Args
+		}
+		// Test args
+		return []string{
+			"-dd",
+		}
+	})()
+
 	// Handle args
-	args, err := flags.Parse(&opts)
+	extraArgs, err := flags.ParseArgs(&opts, args)
 	if err != nil {
 		log.Errorln(err)
 	}
@@ -240,9 +250,9 @@ func main() {
 	default:
 		log.Default.Level = log.DEBUG
 	}
-	log.Debugf("Unparsed args:  %v", os.Args[1:])
+	log.Debugf("Unparsed args:  %v", args)
 	log.Debugf("Parsed args:    %+v", opts)
-	log.Debugf("Remaining args: %v", args)
+	log.Debugf("Remaining args: %v", extraArgs)
 	log.Debugf("Wrote help:     %t\n", flags.WroteHelp(err))
 	// args, err := docli.Parse(doc)
 	// if err != nil {
