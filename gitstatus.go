@@ -9,8 +9,8 @@ import (
 	"strconv"
 	s "strings"
 
-	"github.com/celicoo/docli"
-	// "github.com/jessevdk/go-flags"
+	// "github.com/celicoo/docli"
+	"github.com/jessevdk/go-flags"
 	"github.com/subchen/go-log"
 )
 
@@ -110,27 +110,12 @@ func gitStash() int {
 	if gitDir, err = run(fmt.Sprintf("git -C %s rev-parse --show-toplevel", dir)); err != nil {
 		return 0
 	}
-	stashFile := s.Trim(gitDir, "\n") + "/.git/logs/refs/stash"
-	if stash, err = ioutil.ReadFile(stashFile); err != nil {
+	if stash, err = ioutil.ReadFile(s.Trim(gitDir, "\n") + "/.git/logs/refs/stash"); err != nil {
 		return 0
 	}
 	// Subtract 1 for the last line ending
 	return len(s.Split(string(stash), "\n")) - 1
 }
-
-/*
-def get_stash():
-    """Execute git command to get stash info."""
-    cmd = Popen(["git", "rev-parse", "--git-dir"], stdout=PIPE, stderr=PIPE)
-    so, se = cmd.communicate()
-    stash_file = "{}{}".format(so.decode("utf-8").rstrip(), "/logs/refs/stash")
-
-    try:
-        with open(stash_file) as f:
-            return sum(1 for _ in f)
-    except IOError:
-        return 0
-*/
 
 func parseBranch(raw string) (string, string) {
 	var branch, remoteBranch string
@@ -235,44 +220,57 @@ type cli struct {
 var opts struct {
 	Debug   []bool `short:"d" long:"debug" description:"increase debug verbosity"`
 	Version bool   `short:"v" long:"version" description:"show version info and exit"`
+	Timeout int16  `short:"t" long:"timeout" description:"timeout for git status in ms"`
 }
 
 func main() {
-	// Handle args
-	log.Default.Level = log.DEBUG
-	// args, err := flags.Parse(&opts)
-	// if err != nil {
-	// 	log.Errorln(err)
-	// }
-	// log.Debugf("Parsed args: %v", opts)
-	// log.Debugf("Remaining args: %v", args)
-	args, err := docli.Parse(doc)
-	if err != nil {
-		log.Fatal(err)
-	}
-	var c cli
-	args.Bind(&c)
+	log.Default.Level = log.WARN
 
-	if c.Debug {
+	// Handle args
+	args, err := flags.Parse(&opts)
+	if err != nil {
+		log.Errorln(err)
+	}
+
+	switch len(opts.Debug) {
+	case 0:
+		log.Default.Level = log.WARN
+	case 1:
+		log.Default.Level = log.INFO
+	default:
 		log.Default.Level = log.DEBUG
 	}
-	if len(os.Args) > 1 {
-		log.Debugf("%+v\n", c)
-	}
-	if c.Help {
-		fmt.Println(doc)
-		os.Exit(0)
-	}
-	if c.Version {
-		fmt.Println(version)
-		os.Exit(0)
-	}
-	if c.Format != "" {
-		log.Debugf("Format string: %s", c.Format)
-	}
-	if c.Timeout > 0 {
-		log.Debugf("Timeout length: %d", c.Timeout)
-	}
+	log.Debugf("Unparsed args:  %v", os.Args[1:])
+	log.Debugf("Parsed args:    %+v", opts)
+	log.Debugf("Remaining args: %v", args)
+	log.Debugf("Wrote help:     %t\n", flags.WroteHelp(err))
+	// args, err := docli.Parse(doc)
+	// if err != nil {
+	//     log.Fatal(err)
+	// }
+	// var c cli
+	// args.Bind(&c)
+	//
+	// if c.Debug {
+	//     log.Default.Level = log.DEBUG
+	// }
+	// if len(os.Args) > 1 {
+	//     log.Debugf("%+v\n", c)
+	// }
+	// if c.Help {
+	//     fmt.Println(doc)
+	//     os.Exit(0)
+	// }
+	// if c.Version {
+	//     fmt.Println(version)
+	//     os.Exit(0)
+	// }
+	// if c.Format != "" {
+	//     log.Debugf("Format string: %s", c.Format)
+	// }
+	// if c.Timeout > 0 {
+	//     log.Debugf("Timeout length: %d", c.Timeout)
+	// }
 
 	r := parseStatus()
 	log.Infoln("=== PARSED STATUS ===")
