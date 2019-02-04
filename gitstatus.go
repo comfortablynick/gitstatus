@@ -9,27 +9,10 @@ import (
 	"strconv"
 	s "strings"
 
-	// "github.com/celicoo/docli"
 	"github.com/jessevdk/go-flags"
 	"github.com/subchen/go-log"
 )
 
-var doc = `
-Usage: gitstatus [-d] <command> [-h] [-f FORMAT]...
-
-Fast git status for your prompt!
-
-commands:
-  h, help               show this help message and exit
-  v, version            show version info and exit
-
-optional arguments:
-  -f, --format          format output according to string
-  -d, --debug           print debug messages
-  -t, --timeout         timeout length in ms
-  -v, --version         show version info and exit
-  -h, --help            show help for command
-`
 var version = "gitstatus version 0.0.1"
 
 var dir = cwd()
@@ -220,7 +203,12 @@ type cli struct {
 var opts struct {
 	Debug   []bool `short:"d" long:"debug" description:"increase debug verbosity"`
 	Version bool   `short:"v" long:"version" description:"show version info and exit"`
-	Timeout int16  `short:"t" long:"timeout" description:"timeout for git status in ms"`
+	Timeout int16  `short:"t" long:"timeout" description:"timeout for git status in ms" value-name:"timeout_ms"`
+	Format  string `short:"f" long:"format" description:"printf-style format string for git prompt" value-name:"FORMAT"`
+}
+
+func formatOutput(status []string, fstring string) string {
+	return fmt.Sprintf(fstring, status)
 }
 
 func main() {
@@ -228,18 +216,23 @@ func main() {
 
 	args := (func() []string {
 		if len(os.Args) > 1 {
-			return os.Args
+			return os.Args[1:]
 		}
 		// Test args
+		log.Warnln("Using test arguments")
 		return []string{
 			"-dd",
 		}
 	})()
 
-	// Handle args
-	extraArgs, err := flags.ParseArgs(&opts, args)
+	var parser = flags.NewParser(&opts, flags.Default)
+	extraArgs, err := parser.ParseArgs(args)
+
 	if err != nil {
-		log.Errorln(err)
+		if !flags.WroteHelp(err) {
+			// log.Errorln(err)
+			parser.WriteHelp(os.Stderr)
+		}
 	}
 
 	switch len(opts.Debug) {
@@ -253,34 +246,6 @@ func main() {
 	log.Debugf("Unparsed args:  %v", args)
 	log.Debugf("Parsed args:    %+v", opts)
 	log.Debugf("Remaining args: %v", extraArgs)
-	log.Debugf("Wrote help:     %t\n", flags.WroteHelp(err))
-	// args, err := docli.Parse(doc)
-	// if err != nil {
-	//     log.Fatal(err)
-	// }
-	// var c cli
-	// args.Bind(&c)
-	//
-	// if c.Debug {
-	//     log.Default.Level = log.DEBUG
-	// }
-	// if len(os.Args) > 1 {
-	//     log.Debugf("%+v\n", c)
-	// }
-	// if c.Help {
-	//     fmt.Println(doc)
-	//     os.Exit(0)
-	// }
-	// if c.Version {
-	//     fmt.Println(version)
-	//     os.Exit(0)
-	// }
-	// if c.Format != "" {
-	//     log.Debugf("Format string: %s", c.Format)
-	// }
-	// if c.Timeout > 0 {
-	//     log.Debugf("Timeout length: %d", c.Timeout)
-	// }
 
 	r := parseStatus()
 	log.Infoln("=== PARSED STATUS ===")
