@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -8,16 +9,18 @@ import (
 	re "regexp"
 	"strconv"
 	s "strings"
+	"time"
 
 	"github.com/jessevdk/go-flags"
 	"github.com/subchen/go-log"
 )
 
-var version = "gitstatus version 0.0.1"
+const version = `
+gitstatus version 0.0.1
 
-var dir = cwd()
-
-// var dir = os.ExpandEnv("$HOME/git/python")
+© 2019 Nicholas Murphy
+(github.com/comfortablynick)
+`
 
 const gitHashLen = 12
 
@@ -27,7 +30,8 @@ var logLevels = []log.Level{
 	log.DEBUG,
 }
 
-type repoInfo struct {
+// RepoInfo holds extracted data from `git status`
+type RepoInfo struct {
 	Branch     string
 	Remote     string
 	Added      int
@@ -51,9 +55,21 @@ func cwd() string {
 
 func run(command string) (string, error) {
 	cmdArgs := s.Split(command, " ")
-	log.Debugf("Command: %s", cmdArgs)
-	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...) // #nosec
+	log.Debugf("Command: %s Dir: %s", cmdArgs, Options.Dir)
+
+	// Create context with timeout deadline to stop execution
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(Options.Timeout)*time.Millisecond)
+	defer cancel()
+
+	// Run command inside context
+	cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...) // #nosec
+	cmd.Dir = Options.Dir
 	out, err := cmd.Output()
+
+	if ctx.Err() == context.DeadlineExceeded {
+		log.Debugln("Command timed out")
+		timeoutReached()
+	}
 	return string(out), err
 }
 
@@ -61,10 +77,10 @@ func run(command string) (string, error) {
 func gitTagOrHash(hashLen int) string {
 	var str string
 	var err error
-	if str, err = run(fmt.Sprintf("git -C %s describe --tags --exact-match", dir)); err == nil {
+	if str, err = run("git describe --tags --exact-match"); err == nil {
 		return str
 	}
-	if str, err = run(fmt.Sprintf("git -C %s rev-parse --short=%d HEAD", dir, hashLen)); err == nil {
+	if str, err = run(fmt.Sprintf("git rev-parse --short=%d HEAD", hashLen)); err == nil {
 		return str
 	}
 	log.Errorf("gitTagOrHash() failed: %s\n", err)
@@ -74,7 +90,7 @@ func gitTagOrHash(hashLen int) string {
 var reSpace = re.MustCompile(`\s+`)
 
 func gitDiff() (int, int) {
-	diff, err := run(fmt.Sprintf("git -C %s diff --numstat", dir))
+	diff, err := run("git diff --numstat")
 	if err != nil {
 		log.Errorf("gitDiff() failed: %s\n", err)
 	}
@@ -92,11 +108,12 @@ func gitDiff() (int, int) {
 	return ins, del
 }
 
+// gitStash extracts the number of stashes in the stack
 func gitStash() int {
 	var gitDir string
 	var stash []byte
 	var err error
-	if gitDir, err = run(fmt.Sprintf("git -C %s rev-parse --show-toplevel", dir)); err != nil {
+	if gitDir, err = run("git rev-parse --show-toplevel"); err != nil {
 		return 0
 	}
 	if stash, err = ioutil.ReadFile(s.Trim(gitDir, "\n") + "/.git/logs/refs/stash"); err != nil {
@@ -106,6 +123,7 @@ func gitStash() int {
 	return len(s.Split(string(stash), "\n")) - 1
 }
 
+// parseBranch returns current local branch and remote branch names
 func parseBranch(raw string) (string, string) {
 	var branch, remoteBranch string
 	rest := raw[2:]
@@ -142,10 +160,12 @@ func parseBranch(raw string) (string, string) {
 	return branch, remoteBranch
 }
 
-func parseStatus() repoInfo {
-	status, err := run(fmt.Sprintf("git -C %s status --porcelain --branch", dir))
+// parseStatus runs `git status` and parses relevant data
+func parseStatus() RepoInfo {
+	status, err := run("git status --porcelain --branch")
 	if err != nil {
-		log.Errorf("git status failed:\n%s", err)
+		log.Debugf("git status failed:\n%s", err)
+		os.Exit(1)
 	}
 	lines := s.Split(status, "\n")
 	var branch, remoteBranch string
@@ -180,7 +200,7 @@ func parseStatus() repoInfo {
 	if remoteBranch == "" {
 		remoteBranch = "."
 	}
-	return repoInfo{
+	return RepoInfo{
 		Branch:     branch,
 		Remote:     remoteBranch,
 		Added:      added,
@@ -195,55 +215,112 @@ func parseStatus() repoInfo {
 	}
 }
 
-// Options defines command line arguments
-var Options struct {
-	Debug   []bool `short:"d" long:"debug" description:"increase debug verbosity"`
-	Version bool   `short:"v" long:"version" description:"show version info and exit"`
-	Timeout int16  `short:"t" long:"timeout" description:"timeout for git status in ms" value-name:"timeout_ms"`
-	Format  string `short:"f" long:"format" description:"printf-style format string for git prompt" value-name:"FORMAT"`
+func gitIsDirty(r RepoInfo) bool {
+	if r.Modified > 0 || r.Added > 0 || r.Deleted > 0 {
+		return true
+	}
+	return false
 }
 
-func formatOutput(status []string, fstring string) string {
-	return fmt.Sprintf(fstring, status)
+// Return symbol if bool is true, else empty string
+func promptSymbolIfTrue(result bool, symbol string) string {
+	if result {
+		return symbol
+	}
+	return ""
+}
+
+func formatOutput(r RepoInfo, formatString string) string {
+	log.Debugf("Format string: %s", formatString)
+	rep := s.NewReplacer(
+		"%n", "git",
+		"%b", r.Branch,
+		"%m", promptSymbolIfTrue(gitIsDirty(r), "+"),
+		"%r", r.Remote,
+		"%u", fmt.Sprintf("%d", r.Untracked),
+		"%a", fmt.Sprintf("%d", r.Added),
+		"%d", fmt.Sprintf("%d", r.Deleted),
+		"%s", fmt.Sprintf("%d", r.Stashed),
+		"%x", fmt.Sprintf("%d", r.Insertions),
+		"%y", fmt.Sprintf("%d", r.Deletions),
+	)
+	return rep.Replace(formatString)
+}
+
+// Helper function to write string and exit on timeout
+func timeoutReached() {
+	log.Debug("Timeout reached; try increasing --timeout param")
+	fmt.Println("timeout")
+	os.Exit(1)
+}
+
+// Options defines command line arguments
+var Options struct {
+	Verbose []bool `short:"v" long:"verbose" description:"see more debug messages"`
+	Version bool   `long:"version" description:"show version info and exit"`
+	Dir     string `short:"d" long:"dir" description:"git repo location" value-name:"directory" default:"."`
+	Timeout int16  `short:"t" long:"timeout" description:"timeout for git cmds in ms" value-name:"timeout_ms" default:"100"`
+	Format  string `short:"f" long:"format" description:"printf-style format string for git prompt" value-name:"FORMAT" default:"[%n:%b]"`
 }
 
 func main() {
 	log.Default.Level = log.WARN
 
+	// Use cli args if present, else test args
 	args := (func() []string {
 		if len(os.Args) > 1 {
 			return os.Args[1:]
 		}
-		// Test args
-		log.Warnln("Using test arguments")
-		return []string{
-			"-ddd",
-		}
+		// log.Warnln("Using test arguments")
+		return []string{}
 	})()
 
 	var parser = flags.NewParser(&Options, flags.Default)
+	longDesc := `Git status for your prompt, similar to Greg Ward's vcprompt
+
+	Prints according to FORMAT, which may contain:
+	%n  show VC name
+	%b  show branch
+	%r  show remote (default: ".")
+	%m  indicate uncomitted changes (modified/added/removed)
+	%u  show untracked file count
+	%a  show added file count
+	%d  show deleted file count
+	%s  show stash count
+	%x  show insertion count
+	%y  show deletion count
+	`
+	parser.LongDescription = longDesc
 	extraArgs, err := parser.ParseArgs(args)
 
 	if err != nil {
 		if !flags.WroteHelp(err) {
 			parser.WriteHelp(os.Stderr)
-			os.Exit(1)
 		}
+		os.Exit(1)
 	}
 
 	// Get log level
-	verbosity, maxLevels := len(Options.Debug), len(logLevels)
+	verbosity, maxLevels := len(Options.Verbose), len(logLevels)
 	if verbosity > maxLevels-1 {
 		verbosity = maxLevels - 1
 	}
 
 	log.Default.Level = logLevels[verbosity]
 
-	log.Debugf("Unparsed args:  %v", args)
-	log.Debugf("Parsed args:    %+v", Options)
-	log.Debugf("Remaining args: %v", extraArgs)
+	log.Debugf("Raw args:\n%v", args)
+	log.Debugf("Parsed args:\n%+v", Options)
+	if len(extraArgs) > 0 {
+		log.Debugf("Remaining args:\n%v", extraArgs)
+	}
+
+	if Options.Version {
+		fmt.Println(version)
+		os.Exit(0)
+	}
 
 	r := parseStatus()
+
 	log.Infoln("=== PARSED STATUS ===")
 	log.Infof("    Branch: %s", r.Branch)
 	log.Infof("    Remote: %s", r.Remote)
@@ -256,6 +333,9 @@ func main() {
 	log.Infof(" Untracked: %d", r.Untracked)
 	log.Infof("Insertions: %d", r.Insertions)
 	log.Infof(" Deletions: %d", r.Deletions)
+
+	// Output formatted string
+	fmt.Println(formatOutput(r, Options.Format))
 }
 
 // vim:set sw=4 ts=4:
