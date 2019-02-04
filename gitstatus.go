@@ -21,6 +21,12 @@ var dir = cwd()
 
 const gitHashLen = 12
 
+var logLevels = []log.Level{
+	log.WARN,
+	log.INFO,
+	log.DEBUG,
+}
+
 type repoInfo struct {
 	Branch     string
 	Remote     string
@@ -65,7 +71,7 @@ func gitTagOrHash(hashLen int) string {
 	return ""
 }
 
-var space = re.MustCompile(`\s+`)
+var reSpace = re.MustCompile(`\s+`)
 
 func gitDiff() (int, int) {
 	diff, err := run(fmt.Sprintf("git -C %s diff --numstat", dir))
@@ -75,7 +81,7 @@ func gitDiff() (int, int) {
 	difflines := s.Split(diff, "\n")
 	var ins, del int
 	for _, ln := range difflines[:len(difflines)-1] {
-		diffline := space.Split(ln, -1)
+		diffline := reSpace.Split(ln, -1)
 		if i, err := strconv.Atoi(diffline[0]); err == nil {
 			ins += i
 		}
@@ -189,18 +195,8 @@ func parseStatus() repoInfo {
 	}
 }
 
-type cli struct {
-	// Commands
-	Help    bool
-	Version bool
-
-	// Options
-	Debug   bool
-	Format  string
-	Timeout int16
-}
-
-var opts struct {
+// Options defines command line arguments
+var Options struct {
 	Debug   []bool `short:"d" long:"debug" description:"increase debug verbosity"`
 	Version bool   `short:"v" long:"version" description:"show version info and exit"`
 	Timeout int16  `short:"t" long:"timeout" description:"timeout for git status in ms" value-name:"timeout_ms"`
@@ -221,30 +217,30 @@ func main() {
 		// Test args
 		log.Warnln("Using test arguments")
 		return []string{
-			"-dd",
+			"-ddd",
 		}
 	})()
 
-	var parser = flags.NewParser(&opts, flags.Default)
+	var parser = flags.NewParser(&Options, flags.Default)
 	extraArgs, err := parser.ParseArgs(args)
 
 	if err != nil {
 		if !flags.WroteHelp(err) {
-			// log.Errorln(err)
 			parser.WriteHelp(os.Stderr)
+			os.Exit(1)
 		}
 	}
 
-	switch len(opts.Debug) {
-	case 0:
-		log.Default.Level = log.WARN
-	case 1:
-		log.Default.Level = log.INFO
-	default:
-		log.Default.Level = log.DEBUG
+	// Get log level
+	verbosity, maxLevels := len(Options.Debug), len(logLevels)
+	if verbosity > maxLevels-1 {
+		verbosity = maxLevels - 1
 	}
+
+	log.Default.Level = logLevels[verbosity]
+
 	log.Debugf("Unparsed args:  %v", args)
-	log.Debugf("Parsed args:    %+v", opts)
+	log.Debugf("Parsed args:    %+v", Options)
 	log.Debugf("Remaining args: %v", extraArgs)
 
 	r := parseStatus()
