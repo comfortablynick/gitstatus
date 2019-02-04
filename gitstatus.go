@@ -271,7 +271,7 @@ func main() {
 		if len(os.Args) > 1 {
 			return os.Args[1:]
 		}
-		// log.Warnln("Using test arguments")
+		log.Infoln("Using test arguments")
 		return []string{}
 	})()
 
