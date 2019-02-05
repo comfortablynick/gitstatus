@@ -274,7 +274,9 @@ func main() {
 			return os.Args[1:]
 		}
 		log.Infoln("Using test arguments")
-		return []string{}
+		return []string{
+			"-v",
+		}
 	})()
 
 	var parser = flags.NewParser(&Options, flags.Default)
