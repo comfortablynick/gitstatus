@@ -45,6 +45,8 @@ type RepoInfo struct {
 	Deletions  int
 }
 
+var repo RepoInfo
+
 func cwd() string {
 	path, err := os.Getwd()
 	if err != nil {
@@ -78,10 +80,10 @@ func gitTagOrHash(hashLen int) string {
 	var str string
 	var err error
 	if str, err = run("git describe --tags --exact-match"); err == nil {
-		return str
+		return s.TrimRight(str, "\n")
 	}
 	if str, err = run(fmt.Sprintf("git rev-parse --short=%d HEAD", hashLen)); err == nil {
-		return str
+		return s.TrimRight(str, "\n")
 	}
 	log.Errorf("gitTagOrHash() failed: %s\n", err)
 	return ""
