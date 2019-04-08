@@ -260,9 +260,30 @@ func timeoutReached() {
 var Options struct {
 	Verbose []bool `short:"v" long:"verbose" description:"see more debug messages"`
 	Version bool   `long:"version" description:"show version info and exit"`
+	Simple  bool   `short:"s" long:"simple" description:"simple output, similar to default git prompt"`
 	Dir     string `short:"d" long:"dir" description:"git repo location" value-name:"directory" default:"."`
 	Timeout int16  `short:"t" long:"timeout" description:"timeout for git cmds in ms" value-name:"timeout_ms" default:"100"`
 	Format  string `short:"f" long:"format" description:"printf-style format string for git prompt" value-name:"FORMAT" default:"[%n:%b]"`
+}
+
+// Output simple status, similar to default git prompt in bash
+func simpleStatus() error {
+	status, err := run("git status --porcelain --branch")
+	status = s.Trim(status, "\n")
+	log.Debugf("Git status:\n%s", status)
+
+	var branch string
+	lines := s.Split(status, "\n")
+	for _, ln := range lines {
+		if ln[0:3] == "## " {
+			branch = ln[3:]
+			if ind := s.Index(branch, "..."); ind > -1 {
+				branch = branch[:ind]
+			}
+		}
+	}
+	log.Debugf("Branch: %s", branch)
+	return err
 }
 
 func main() {
@@ -320,6 +341,15 @@ func main() {
 
 	if Options.Version {
 		fmt.Println(version)
+		os.Exit(0)
+	}
+
+	if Options.Simple {
+		log.Debugln("Printing simple status")
+		if err = simpleStatus(); err != nil {
+			log.Errorf("error: %s", err)
+			os.Exit(1)
+		}
 		os.Exit(0)
 	}
 
